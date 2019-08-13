@@ -75,7 +75,7 @@ namespace jagged {
             for (unsigned j = 0; j < N; j++) {
                 c[i][j] = 0;
                 for (unsigned k = 0; k < N; k++) {
-                    c[i][j] += a[k][j] * b[i][k];
+                    c[i][j] += a[i][k] * b[k][j];
                 }
             }
         }
@@ -89,7 +89,7 @@ namespace jagged {
                         for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
                             c[i][j] = 0;
                             for (unsigned k = 0; k < N; k++) {
-                                c[i][j] += a[k][j] * b[i][k];
+                                c[i][j] += a[i][k] * b[k][j];
                             }
                         }
                     }
@@ -121,7 +121,7 @@ namespace jagged {
                 for (unsigned j = 0; j < N; j++) {
                     c[i][j] = 0;
                     for (unsigned k = 0; k < N; k++) {
-                        c[i][j] += a[k][j] * b[i][k];
+                        c[i][j] += a[i][k] * b[k][j];
                     }
                 }
             }
@@ -173,7 +173,7 @@ namespace jagged {
                 for (unsigned j = 0; j < args.N; j++) {
                     args.c[i][j] = 0;
                     for (unsigned k = 0; k < args.N; k++) {
-                        args.c[i][j] += args.a[k][j] * args.b[i][k];
+                        args.c[i][j] += args.a[i][k] * args.b[k][j];
                     }
                 }
             }
@@ -276,7 +276,7 @@ namespace flat {
             for (unsigned j = 0; j < N; j++) {
                 c[index(i, j, N)] = 0;
                 for (unsigned k = 0; k < N; k++) {
-                    c[index(i, j, N)] += a[index(k, j, N)] * b[index(i, k, N)];
+                    c[index(i, j, N)] += a[index(i, k, N)] * b[index(k, j, N)];
                 }
             }
         }
@@ -290,7 +290,7 @@ namespace flat {
                         for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
                             c[index(i, j, N)] = 0;
                             for (unsigned k = 0; k < N; k++) {
-                                c[index(i, j, N)] += a[index(k, j, N)] * b[index(i, k, N)];
+                                c[index(i, j, N)] += a[index(i, k, N)] * b[index(k, j, N)];
                             }
                         }
                     }
@@ -322,7 +322,7 @@ namespace flat {
                 for (unsigned j = 0; j < N; j++) {
                     c[index(i, j, N)] = 0;
                     for (unsigned k = 0; k < N; k++) {
-                        c[index(i, j, N)] += a[index(k, j, N)] * b[index(i, k, N)];
+                        c[index(i, j, N)] += a[index(i, k, N)] * b[index(k, j, N)];
                     }
                 }
             }
@@ -375,7 +375,7 @@ namespace flat {
                     args.c[index(i, j, args.N)] = 0;
                     for (unsigned k = 0; k < args.N; k++) {
                         args.c[index(i, j, args.N)] +=
-                            args.a[index(k, j, args.N)] * args.b[index(i, k, args.N)];
+                            args.a[index(i, k, args.N)] * args.b[index(k, j, args.N)];
                     }
                 }
             }
