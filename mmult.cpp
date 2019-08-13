@@ -354,8 +354,6 @@ namespace flat {
     }
 } // namespace flat
 
-// Change this between 'flat' and 'jagged' to use the different allocation strategies
-using namespace flat;
 
 int main(int argc, char const* argv[]) {
     // Set N from the arguments or user input
@@ -394,6 +392,9 @@ int main(int argc, char const* argv[]) {
         jagged::deallocateMx(b, N);
         jagged::deallocateMx(c, N);
     }
+
+    // So we don't need to prefix everything from here on with flat::
+    using namespace flat;
 
     // Pointers to flat allocation that is N*N elements
     Type* a = allocateMx(N);
