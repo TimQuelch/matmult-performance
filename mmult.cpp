@@ -81,172 +81,6 @@ namespace jagged {
         }
     }
 
-    // Transpose a matrix in place. e.g. for all (i, j) combinations, mx[i, j] <- mx[j, i]
-    void transposeMx(Type** mx, unsigned N) {
-        for (unsigned i = 1; i < N; i++) {
-            for (unsigned j = 0; j < i; j++) {
-                std::swap(mx[i][j], mx[j][i]);
-            }
-        }
-    }
-
-    namespace tiled {
-        void multiplyMx(Type** a, Type** b, Type** c, unsigned N, unsigned tileSize) {
-            for (unsigned tr = 0; tr < N; tr += tileSize) {
-                for (unsigned tc = 0; tc < N; tc += tileSize) {
-                    for (unsigned i = tr; i < std::min(tr + tileSize, N); i++) {
-                        for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
-                            c[i][j] = 0;
-                            for (unsigned k = 0; k < N; k++) {
-                                c[i][j] += a[i][k] * b[k][j];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } // namespace tiled
-
-    namespace transposed {
-        void multiplyMx(Type** a, Type** bt, Type** c, unsigned N) {
-            for (unsigned i = 0; i < N; i++) {
-                for (unsigned j = 0; j < N; j++) {
-                    c[i][j] = 0;
-                    for (unsigned k = 0; k < N; k++) {
-                        c[i][j] += a[i][k] * bt[j][k];
-                    }
-                }
-            }
-        }
-    } // namespace transposed
-
-    namespace tiled_transposed {
-        void multiplyMx(Type** a, Type** bt, Type** c, unsigned N, unsigned tileSize) {
-            for (unsigned tr = 0; tr < N; tr += tileSize) {
-                for (unsigned tc = 0; tc < N; tc += tileSize) {
-                    for (unsigned i = tr; i < std::min(tr + tileSize, N); i++) {
-                        for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
-                            c[i][j] = 0;
-                            for (unsigned k = 0; k < N; k++) {
-                                c[i][j] += a[i][k] * bt[j][k];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } // namespace tiled_transposed
-
-    namespace threaded {
-        void multiplyMxChunk(Type** a,
-                             Type** b,
-                             Type** c,
-                             unsigned N,
-                             unsigned nThreads,
-                             unsigned threadId) {
-            unsigned chunkSize = (N + nThreads - 1) / nThreads; // Calculate the size of our chunks
-            // This is N / nThreads with forced ceil rounding, rather than floor rounding
-
-            // Calculate the start and end indexes
-            unsigned startIndex = chunkSize * threadId;
-            unsigned finishIndex = std::min(startIndex + chunkSize, N);
-
-            // std::cout << "Starting thread " << threadId << " "
-            //          << "(" << std::this_thread::get_id() << "). Index " << startIndex << " to "
-            //          << finishIndex << "\n";
-
-            // Compute the matrix multiplication for the specified chunk
-            for (unsigned i = startIndex; i < finishIndex; i++) {
-                for (unsigned j = 0; j < N; j++) {
-                    c[i][j] = 0;
-                    for (unsigned k = 0; k < N; k++) {
-                        c[i][j] += a[i][k] * b[k][j];
-                    }
-                }
-            }
-        }
-
-        void multiplyMx(Type** a, Type** b, Type** c, unsigned N, unsigned nThreads) {
-            auto threads = new std::thread[N]; // Allocate array to hold our thread handles
-
-            // Start each thread with a different threadId (i)
-            for (unsigned i = 0; i < nThreads; i++) {
-                threads[i] = std::thread{multiplyMxChunk, a, b, c, N, nThreads, i};
-            }
-
-            // Wait for all our threads to complete their work
-            for (unsigned i = 0; i < nThreads; i++) {
-                threads[i].join();
-            }
-
-            delete[] threads; // Deallocate our thread array
-        }
-    } // namespace threaded
-
-    namespace threaded_pthreads {
-        struct Args {
-            Type** a;
-            Type** b;
-            Type** c;
-            unsigned N;
-            unsigned nThreads;
-            unsigned threadId;
-        };
-
-        void* multiplyMxChunk(void* rawArgs) {
-            Args args = *(Args*)rawArgs;
-            unsigned chunkSize =
-                (args.N + args.nThreads - 1) / args.nThreads; // Calculate the size of our chunks
-            // This is N / nThreads with forced ceil rounding, rather than floor rounding
-
-            // Calculate the start and end indexes
-            unsigned startIndex = chunkSize * args.threadId;
-            unsigned finishIndex = std::min(startIndex + chunkSize, args.N);
-
-            // std::cout << "Starting thread " << threadId << " "
-            //          << "(" << std::this_thread::get_id() << "). Index " << startIndex << " to "
-            //          << finishIndex << "\n";
-
-            // Compute the matrix multiplication for the specified chunk
-            for (unsigned i = startIndex; i < finishIndex; i++) {
-                for (unsigned j = 0; j < args.N; j++) {
-                    args.c[i][j] = 0;
-                    for (unsigned k = 0; k < args.N; k++) {
-                        args.c[i][j] += args.a[i][k] * args.b[k][j];
-                    }
-                }
-            }
-            return nullptr;
-        }
-
-        void multiplyMx(Type** a, Type** b, Type** c, unsigned N, unsigned nThreads) {
-            auto args = new Args[nThreads];
-
-            for (unsigned i = 0; i < nThreads; i++) {
-                args[i].a = a;
-                args[i].b = b;
-                args[i].c = c;
-                args[i].N = N;
-                args[i].nThreads = nThreads;
-                args[i].threadId = i;
-            }
-
-            auto threads = new pthread_t[N]; // Allocate array to hold our thread handles
-
-            // Start each thread with a different threadId (i)
-            for (unsigned i = 0; i < nThreads; i++) {
-                pthread_create(&threads[i], nullptr, multiplyMxChunk, &args[i]);
-            }
-
-            // Wait for all our threads to complete their work
-            for (unsigned i = 0; i < nThreads; i++) {
-                pthread_join(threads[i], nullptr);
-            }
-
-            delete[] threads; // Deallocate our thread array
-        }
-    } // namespace threaded_pthreads
-
     // Output the mx to a binary file
     void outputFile(Type** mx, std::string filename, unsigned N) {
         std::ofstream file(filename, std::ios::binary);
@@ -533,10 +367,38 @@ int main(int argc, char const* argv[]) {
         std::cin >> N;
     }
 
-    // Will either be a Type* or Type** depending on which namespace we enabled
-    auto a = allocateMx(N);
-    auto b = allocateMx(N);
-    auto c = allocateMx(N);
+    std::cout << "Running serial (jagged allocation) computation...\n";
+    {
+        // Array of arrays. First level points to each row
+        Type** a = jagged::allocateMx(N);
+        Type** b = jagged::allocateMx(N);
+        Type** c = jagged::allocateMx(N);
+
+        // Populate our input matrices
+        jagged::populateMx(a, N);
+        jagged::populateMx(b, N);
+
+        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
+        jagged::multiplyMx(a, b, c, N);                         // Execute matrix multiply
+        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+
+        // Calculate the time as floating point in milliseconds
+        auto time = std::chrono::duration<double, std::milli>(end - start).count();
+
+        // Print time to output
+        std::cout << "N = " << N << ":  " << time << " ms\n";
+        jagged::outputFile(c, "validation.bin", N);          // Write output to file
+        jagged::validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
+
+        jagged::deallocateMx(a, N);
+        jagged::deallocateMx(b, N);
+        jagged::deallocateMx(c, N);
+    }
+
+    // Pointers to flat allocation that is N*N elements
+    Type* a = allocateMx(N);
+    Type* b = allocateMx(N);
+    Type* c = allocateMx(N);
 
     // Populate our input matrices
     populateMx(a, N);
@@ -560,10 +422,10 @@ int main(int argc, char const* argv[]) {
     std::cout << "Running transposed serial computation...\n";
     {
         auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        transposeMx(b, N);
-        transposed::multiplyMx(a, b, c, N);                   // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now(); // Top the timer
-        transposeMx(b, N);                                    // reset b
+        transposeMx(b, N);                                      // Transpose b matrix
+        transposed::multiplyMx(a, b, c, N);                     // Execute matrix multiply
+        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+        transposeMx(b, N);                                      // Reset b for next computation
 
         // Calculate the time as floating point in milliseconds
         auto time = std::chrono::duration<double, std::milli>(end - start).count();
@@ -595,10 +457,10 @@ int main(int argc, char const* argv[]) {
         populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
 
         auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        transposeMx(b, N);
-        tiled_transposed::multiplyMx(a, b, c, N, i);          // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now(); // Top the timer
-        transposeMx(b, N);
+        transposeMx(b, N);                                      // Transpose b matrix
+        tiled_transposed::multiplyMx(a, b, c, N, i);            // Execute matrix multiply
+        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+        transposeMx(b, N);                                      // Reset b for next computation
 
         // Calculate the time as floating point in milliseconds
         auto time = std::chrono::duration<double, std::milli>(end - start).count();
