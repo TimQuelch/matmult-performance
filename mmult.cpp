@@ -81,6 +81,15 @@ namespace jagged {
         }
     }
 
+    // Transpose a matrix in place. e.g. for all (i, j) combinations, mx[i, j] <- mx[j, i]
+    void transposeMx(Type** mx, unsigned N) {
+        for (unsigned i = 1; i < N; i++) {
+            for (unsigned j = 0; j < i; j++) {
+                std::swap(mx[i][j], mx[j][i]);
+            }
+        }
+    }
+
     namespace tiled {
         void multiplyMx(Type** a, Type** b, Type** c, unsigned N, unsigned tileSize) {
             for (unsigned tr = 0; tr < N; tr += tileSize) {
@@ -97,6 +106,36 @@ namespace jagged {
             }
         }
     } // namespace tiled
+
+    namespace transposed {
+        void multiplyMx(Type** a, Type** bt, Type** c, unsigned N) {
+            for (unsigned i = 0; i < N; i++) {
+                for (unsigned j = 0; j < N; j++) {
+                    c[i][j] = 0;
+                    for (unsigned k = 0; k < N; k++) {
+                        c[i][j] += a[i][k] * bt[j][k];
+                    }
+                }
+            }
+        }
+    } // namespace transposed
+
+    namespace tiled_transposed {
+        void multiplyMx(Type** a, Type** bt, Type** c, unsigned N, unsigned tileSize) {
+            for (unsigned tr = 0; tr < N; tr += tileSize) {
+                for (unsigned tc = 0; tc < N; tc += tileSize) {
+                    for (unsigned i = tr; i < std::min(tr + tileSize, N); i++) {
+                        for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
+                            c[i][j] = 0;
+                            for (unsigned k = 0; k < N; k++) {
+                                c[i][j] += a[i][k] * bt[j][k];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } // namespace tiled_transposed
 
     namespace threaded {
         void multiplyMxChunk(Type** a,
@@ -270,6 +309,15 @@ namespace flat {
         }
     }
 
+    // Transpose a matrix in place. e.g. for all (i, j) combinations, mx[i, j] <- mx[j, i]
+    void transposeMx(Type* mx, unsigned N) {
+        for (unsigned i = 1; i < N; i++) {
+            for (unsigned j = 0; j < i; j++) {
+                std::swap(mx[index(i, j, N)], mx[index(j, i, N)]);
+            }
+        }
+    }
+
     // Multiply the matrices a and b into result c. A * B = C
     void multiplyMx(Type const* a, Type const* b, Type* c, unsigned N) {
         for (unsigned i = 0; i < N; i++) {
@@ -298,6 +346,36 @@ namespace flat {
             }
         }
     } // namespace tiled
+
+    namespace transposed {
+        void multiplyMx(Type const* a, Type const* bt, Type* c, unsigned N) {
+            for (unsigned i = 0; i < N; i++) {
+                for (unsigned j = 0; j < N; j++) {
+                    c[index(i, j, N)] = 0;
+                    for (unsigned k = 0; k < N; k++) {
+                        c[index(i, j, N)] += a[index(i, k, N)] * bt[index(j, k, N)];
+                    }
+                }
+            }
+        }
+    } // namespace transposed
+
+    namespace tiled_transposed {
+        void multiplyMx(Type const* a, Type const* bt, Type* c, unsigned N, unsigned tileSize) {
+            for (unsigned tr = 0; tr < N; tr += tileSize) {
+                for (unsigned tc = 0; tc < N; tc += tileSize) {
+                    for (unsigned i = tr; i < std::min(tr + tileSize, N); i++) {
+                        for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
+                            c[index(i, j, N)] = 0;
+                            for (unsigned k = 0; k < N; k++) {
+                                c[index(i, j, N)] += a[index(i, k, N)] * bt[index(j, k, N)];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } // namespace tiled_transposed
 
     namespace threaded {
         void multiplyMxChunk(Type const* a,
@@ -465,17 +543,36 @@ int main(int argc, char const* argv[]) {
     populateMx(b, N);
 
     std::cout << "Running serial computation...\n";
-    auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-    multiplyMx(a, b, c, N);                                 // Execute matrix multiply
-    auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+    {
+        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
+        multiplyMx(a, b, c, N);                                 // Execute matrix multiply
+        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
 
-    // Calculate the time as floating point in milliseconds
-    auto time = std::chrono::duration<double, std::milli>(end - start).count();
+        // Calculate the time as floating point in milliseconds
+        auto time = std::chrono::duration<double, std::milli>(end - start).count();
 
-    // Print time to output
-    std::cout << "N = " << N << ":  " << time << " ms\n";
-    outputFile(c, "validation.bin", N);          // Write output to file
-    validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
+        // Print time to output
+        std::cout << "N = " << N << ":  " << time << " ms\n";
+        outputFile(c, "validation.bin", N);          // Write output to file
+        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
+    }
+
+    std::cout << "Running transposed serial computation...\n";
+    {
+        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
+        transposeMx(b, N);
+        transposed::multiplyMx(a, b, c, N);                   // Execute matrix multiply
+        auto end = std::chrono::high_resolution_clock::now(); // Top the timer
+        transposeMx(b, N);                                    // reset b
+
+        // Calculate the time as floating point in milliseconds
+        auto time = std::chrono::duration<double, std::milli>(end - start).count();
+
+        // Print time to output
+        std::cout << "N = " << N << ":  " << time << " ms\n";
+        outputFile(c, "output.bin", N);              // Write output to file
+        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
+    }
 
     std::cout << "Running tiled serial computation...\n";
     for (unsigned i = 1; i <= 1024; i *= 2) {
@@ -484,6 +581,24 @@ int main(int argc, char const* argv[]) {
         auto start = std::chrono::high_resolution_clock::now(); // Start a timer
         tiled::multiplyMx(a, b, c, N, i);                       // Execute matrix multiply
         auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+
+        // Calculate the time as floating point in milliseconds
+        auto time = std::chrono::duration<double, std::milli>(end - start).count();
+
+        // Print time to output
+        std::cout << "N = " << N << ", ts = " << i << ":  " << time << " ms\n";
+        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
+    }
+
+    std::cout << "Running tiled and transposed serial computation...\n";
+    for (unsigned i = 1; i <= 1024; i *= 2) {
+        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
+
+        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
+        transposeMx(b, N);
+        tiled_transposed::multiplyMx(a, b, c, N, i);          // Execute matrix multiply
+        auto end = std::chrono::high_resolution_clock::now(); // Top the timer
+        transposeMx(b, N);
 
         // Calculate the time as floating point in milliseconds
         auto time = std::chrono::duration<double, std::milli>(end - start).count();
