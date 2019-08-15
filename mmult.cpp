@@ -322,6 +322,52 @@ namespace flat {
         }
     } // namespace threaded_pthreads
 
+    namespace threaded_transposed {
+        void multiplyMxChunk(Type const* a,
+                             Type const* bt,
+                             Type* c,
+                             unsigned N,
+                             unsigned nThreads,
+                             unsigned threadId) {
+            unsigned chunkSize = (N + nThreads - 1) / nThreads; // Calculate the size of our chunks
+            // This is N / nThreads with forced ceil rounding, rather than floor rounding
+
+            // Calculate the start and end indexes
+            unsigned startIndex = chunkSize * threadId;
+            unsigned finishIndex = std::min(startIndex + chunkSize, N);
+
+            // std::cout << "Starting thread " << threadId << " "
+            //          << "(" << std::this_thread::get_id() << "). Index " << startIndex << " to "
+            //          << finishIndex << "\n";
+
+            // Compute the matrix multiplication for the specified chunk
+            for (unsigned i = startIndex; i < finishIndex; i++) {
+                for (unsigned j = 0; j < N; j++) {
+                    c[index(i, j, N)] = 0;
+                    for (unsigned k = 0; k < N; k++) {
+                        c[index(i, j, N)] += a[index(i, k, N)] * bt[index(j, k, N)];
+                    }
+                }
+            }
+        }
+
+        void multiplyMx(Type const* a, Type const* b, Type* c, unsigned N, unsigned nThreads) {
+            auto threads = new std::thread[N]; // Allocate array to hold our thread handles
+
+            // Start each thread with a different threadId (i)
+            for (unsigned i = 0; i < nThreads; i++) {
+                threads[i] = std::thread{multiplyMxChunk, a, b, c, N, nThreads, i};
+            }
+
+            // Wait for all our threads to complete their work
+            for (unsigned i = 0; i < nThreads; i++) {
+                threads[i].join();
+            }
+
+            delete[] threads; // Deallocate our thread array
+        }
+    } // namespace threaded_transposed
+
     // Output the mx to a binary file
     void outputFile(Type const* mx, std::string filename, unsigned N) {
         std::ofstream file(filename, std::ios::binary);
@@ -494,6 +540,25 @@ int main(int argc, char const* argv[]) {
         auto start = std::chrono::high_resolution_clock::now(); // Start a timer
         threaded_pthreads::multiplyMx(a, b, c, N, i);           // Execute matrix multiply
         auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+
+        // Calculate the time as floating point in milliseconds
+        auto time = std::chrono::duration<double, std::milli>(end - start).count();
+
+        // Print time to output
+        std::cout << "N = " << N << ", nt = " << i << ":  " << time << " ms\n";
+        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
+    }
+
+    std::cout << "Running threaded transposed computation...\n";
+    for (unsigned i = 1; i <= 256; i *= 2) {
+        populateMx(c,
+                   N); // Reset output mx to random values to ensure validation works correctly
+
+        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
+        transposeMx(b, N);                                      // Transpose b matrix
+        threaded_transposed::multiplyMx(a, b, c, N, i);         // Execute matrix multiply
+        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+        transposeMx(b, N);                                      // Transpose b matrix
 
         // Calculate the time as floating point in milliseconds
         auto time = std::chrono::duration<double, std::milli>(end - start).count();
