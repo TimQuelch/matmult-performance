@@ -57,7 +57,7 @@ void populateMx(Type* mx, unsigned N) {
 }
 
 // Multiply the matrices a and b into result c. A * B = C
-void multiplyMx(Type const* a, Type const* b, Type* c, unsigned N) {
+void multiplyMx(Type* a, Type* b, Type* c, unsigned N) {
     for (unsigned i = 0; i < N; i++) {
         for (unsigned j = 0; j < N; j++) {
             c[index(i, j, N)] = 0;
@@ -69,13 +69,13 @@ void multiplyMx(Type const* a, Type const* b, Type* c, unsigned N) {
 }
 
 // Output the mx to a binary file
-void outputFile(Type const* mx, std::string filename, unsigned N) {
+void outputFile(Type* mx, std::string filename, unsigned N) {
     std::ofstream file(filename, std::ios::binary);
     file.write((char*)mx, sizeof(Type) * N * N);
 }
 
 // Compare a mx to a previously written binary file
-void validateAgainstFile(Type const* mx, std::string filename, unsigned N) {
+void validateAgainstFile(Type* mx, std::string filename, unsigned N) {
     // Open validation file
     std::ifstream file(filename, std::ios::binary);
 
