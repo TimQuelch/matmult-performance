@@ -40,85 +40,6 @@ Type rng() {
     return distribution(engine); // Generate the random number
 }
 
-// This namespace contains functions that work with 'jagged' allocations of matrices. These matrices
-// are of Type** and require N+1 memory allocations of size N
-namespace jagged {
-    // Allocate a mx in memory
-    Type** allocateMx(unsigned N) {
-        auto mx = new Type*[N];
-        for (unsigned i = 0; i < N; i++) {
-            mx[i] = new Type[N];
-        }
-        return mx;
-    }
-
-    // Deallocate a mx from memory
-    void deallocateMx(Type** mx, unsigned N) {
-        for (unsigned i = 0; i < N; i++) {
-            delete[] mx[i];
-        }
-        delete[] mx;
-    }
-
-    // Populate a mx with random numbers
-    void populateMx(Type** mx, unsigned N) {
-        for (unsigned i = 0; i < N; i++) {
-            for (unsigned j = 0; j < N; j++) {
-                mx[i][j] = rng();
-            }
-        }
-    }
-
-    // Multiply the matrices a and b into result c. A * B = C
-    void multiplyMx(Type** a, Type** b, Type** c, unsigned N) {
-        for (unsigned i = 0; i < N; i++) {
-            for (unsigned j = 0; j < N; j++) {
-                c[i][j] = 0;
-                for (unsigned k = 0; k < N; k++) {
-                    c[i][j] += a[i][k] * b[k][j];
-                }
-            }
-        }
-    }
-
-    // Output the mx to a binary file
-    void outputFile(Type** mx, std::string filename, unsigned N) {
-        std::ofstream file(filename, std::ios::binary);
-        for (unsigned i = 0; i < N; i++) {
-            file.write((char*)mx[i], sizeof(Type) * N);
-        }
-    }
-
-    // Compare a mx to a previously written binary file
-    void validateAgainstFile(Type** mx, std::string filename, unsigned N) {
-        // Open validation file
-        std::ifstream file(filename, std::ios::binary);
-
-        // Allocate validation matrix and read in all rows
-        auto checkMx = allocateMx(N);
-        for (unsigned i = 0; i < N; i++) {
-            file.read((char*)checkMx[i], sizeof(Type) * N);
-        }
-
-        // Check all values match
-        bool matching = true;
-        for (unsigned i = 0; i < N; i++) {
-            for (unsigned j = 0; j < N; j++) {
-                if (checkMx[i][j] != mx[i][j]) {
-                    matching = false;
-                }
-            }
-        }
-
-        if (!matching) {
-            std::cout << "Matrix values do not match validation file!\n";
-        }
-
-        // Deallocate validation matrix
-        deallocateMx(checkMx, N);
-    }
-} // namespace jagged
-
 // This namespace contains functions that work with 'flat' allocations of matrices. These matrices
 // are of Type* and require only a single allocation of NxN values.
 namespace flat {
@@ -163,53 +84,6 @@ namespace flat {
             }
         }
     }
-
-    namespace tiled {
-        void multiplyMx(Type const* a, Type const* b, Type* c, unsigned N, unsigned tileSize) {
-            for (unsigned tr = 0; tr < N; tr += tileSize) {
-                for (unsigned tc = 0; tc < N; tc += tileSize) {
-                    for (unsigned i = tr; i < std::min(tr + tileSize, N); i++) {
-                        for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
-                            c[index(i, j, N)] = 0;
-                            for (unsigned k = 0; k < N; k++) {
-                                c[index(i, j, N)] += a[index(i, k, N)] * b[index(k, j, N)];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } // namespace tiled
-
-    namespace transposed {
-        void multiplyMx(Type const* a, Type const* bt, Type* c, unsigned N) {
-            for (unsigned i = 0; i < N; i++) {
-                for (unsigned j = 0; j < N; j++) {
-                    c[index(i, j, N)] = 0;
-                    for (unsigned k = 0; k < N; k++) {
-                        c[index(i, j, N)] += a[index(i, k, N)] * bt[index(j, k, N)];
-                    }
-                }
-            }
-        }
-    } // namespace transposed
-
-    namespace tiled_transposed {
-        void multiplyMx(Type const* a, Type const* bt, Type* c, unsigned N, unsigned tileSize) {
-            for (unsigned tr = 0; tr < N; tr += tileSize) {
-                for (unsigned tc = 0; tc < N; tc += tileSize) {
-                    for (unsigned i = tr; i < std::min(tr + tileSize, N); i++) {
-                        for (unsigned j = tc; j < std::min(tc + tileSize, N); j++) {
-                            c[index(i, j, N)] = 0;
-                            for (unsigned k = 0; k < N; k++) {
-                                c[index(i, j, N)] += a[index(i, k, N)] * bt[index(j, k, N)];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } // namespace tiled_transposed
 
     namespace threaded {
         void multiplyMxChunk(Type const* a,
@@ -257,71 +131,6 @@ namespace flat {
         }
     } // namespace threaded
 
-    namespace threaded_pthreads {
-        struct Args {
-            Type const* a;
-            Type const* b;
-            Type* c;
-            unsigned N;
-            unsigned nThreads;
-            unsigned threadId;
-        };
-
-        void* multiplyMxChunk(void* rawArgs) {
-            Args args = *(Args*)rawArgs;
-            unsigned chunkSize =
-                (args.N + args.nThreads - 1) / args.nThreads; // Calculate the size of our chunks
-            // This is N / nThreads with forced ceil rounding, rather than floor rounding
-
-            // Calculate the start and end indexes
-            unsigned startIndex = chunkSize * args.threadId;
-            unsigned finishIndex = std::min(startIndex + chunkSize, args.N);
-
-            // std::cout << "Starting thread " << threadId << " "
-            //          << "(" << std::this_thread::get_id() << "). Index " << startIndex << " to "
-            //          << finishIndex << "\n";
-
-            // Compute the matrix multiplication for the specified chunk
-            for (unsigned i = startIndex; i < finishIndex; i++) {
-                for (unsigned j = 0; j < args.N; j++) {
-                    args.c[index(i, j, args.N)] = 0;
-                    for (unsigned k = 0; k < args.N; k++) {
-                        args.c[index(i, j, args.N)] +=
-                            args.a[index(i, k, args.N)] * args.b[index(k, j, args.N)];
-                    }
-                }
-            }
-            return nullptr;
-        }
-
-        void multiplyMx(Type const* a, Type const* b, Type* c, unsigned N, unsigned nThreads) {
-            auto args = new Args[nThreads];
-
-            for (unsigned i = 0; i < nThreads; i++) {
-                args[i].a = a;
-                args[i].b = b;
-                args[i].c = c;
-                args[i].N = N;
-                args[i].nThreads = nThreads;
-                args[i].threadId = i;
-            }
-
-            auto threads = new pthread_t[N]; // Allocate array to hold our thread handles
-
-            // Start each thread with a different threadId (i)
-            for (unsigned i = 0; i < nThreads; i++) {
-                pthread_create(&threads[i], nullptr, multiplyMxChunk, &args[i]);
-            }
-
-            // Wait for all our threads to complete their work
-            for (unsigned i = 0; i < nThreads; i++) {
-                pthread_join(threads[i], nullptr);
-            }
-
-            delete[] threads; // Deallocate our thread array
-        }
-    } // namespace threaded_pthreads
-
     // Output the mx to a binary file
     void outputFile(Type const* mx, std::string filename, unsigned N) {
         std::ofstream file(filename, std::ios::binary);
@@ -354,7 +163,6 @@ namespace flat {
     }
 } // namespace flat
 
-
 int main(int argc, char const* argv[]) {
     // Set N from the arguments or user input
     unsigned N = 0;
@@ -363,34 +171,6 @@ int main(int argc, char const* argv[]) {
     } else {
         std::cout << "Enter the dimension of the matrix: ";
         std::cin >> N;
-    }
-
-    std::cout << "Running serial (jagged allocation) computation...\n";
-    {
-        // Array of arrays. First level points to each row
-        Type** a = jagged::allocateMx(N);
-        Type** b = jagged::allocateMx(N);
-        Type** c = jagged::allocateMx(N);
-
-        // Populate our input matrices
-        jagged::populateMx(a, N);
-        jagged::populateMx(b, N);
-
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        jagged::multiplyMx(a, b, c, N);                         // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
-        std::cout << "N = " << N << ":  " << time << " ms\n";
-        jagged::outputFile(c, "validation.bin", N);          // Write output to file
-        jagged::validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
-
-        jagged::deallocateMx(a, N);
-        jagged::deallocateMx(b, N);
-        jagged::deallocateMx(c, N);
     }
 
     // So we don't need to prefix everything from here on with flat::
@@ -420,79 +200,12 @@ int main(int argc, char const* argv[]) {
         validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
-    std::cout << "Running transposed serial computation...\n";
-    {
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        transposeMx(b, N);                                      // Transpose b matrix
-        transposed::multiplyMx(a, b, c, N);                     // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-        transposeMx(b, N);                                      // Reset b for next computation
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
-        std::cout << "N = " << N << ":  " << time << " ms\n";
-        outputFile(c, "output.bin", N);              // Write output to file
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
-    }
-
-    std::cout << "Running tiled serial computation...\n";
-    for (unsigned i = 1; i <= 1024; i *= 2) {
-        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
-
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        tiled::multiplyMx(a, b, c, N, i);                       // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
-        std::cout << "N = " << N << ", ts = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
-    }
-
-    std::cout << "Running tiled and transposed serial computation...\n";
-    for (unsigned i = 1; i <= 1024; i *= 2) {
-        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
-
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        transposeMx(b, N);                                      // Transpose b matrix
-        tiled_transposed::multiplyMx(a, b, c, N, i);            // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-        transposeMx(b, N);                                      // Reset b for next computation
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
-        std::cout << "N = " << N << ", ts = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
-    }
-
     std::cout << "Running threaded (std::thread) computation...\n";
     for (unsigned i = 1; i <= 256; i *= 2) {
         populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
 
         auto start = std::chrono::high_resolution_clock::now(); // Start a timer
         threaded::multiplyMx(a, b, c, N, i);                    // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
-        std::cout << "N = " << N << ", nt = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
-    }
-
-    std::cout << "Running threaded (pthreads) computation...\n";
-    for (unsigned i = 1; i <= 256; i *= 2) {
-        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
-
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        threaded_pthreads::multiplyMx(a, b, c, N, i);           // Execute matrix multiply
         auto end = std::chrono::high_resolution_clock::now();   // Top the timer
 
         // Calculate the time as floating point in milliseconds
