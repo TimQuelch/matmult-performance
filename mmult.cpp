@@ -25,6 +25,8 @@
 
 #include <pthread.h> // POSIX threads (pthreads)
 
+#include <omp.h> // OpenMP runtime
+
 // Change this between int, double, short, float etc.
 using Type = double;
 
@@ -338,6 +340,21 @@ namespace flat {
         }
     } // namespace threaded_pthreads
 
+    namespace threaded_openmp {
+        void multiplyMx(Type const* a, Type const* b, Type* c, unsigned N, unsigned nThreads) {
+            omp_set_num_threads(nThreads);
+#pragma omp parallel for
+            for (unsigned i = 0; i < N; i++) {
+                for (unsigned j = 0; j < N; j++) {
+                    c[index(i, j, N)] = 0;
+                    for (unsigned k = 0; k < N; k++) {
+                        c[index(i, j, N)] += a[index(i, k, N)] * b[index(k, j, N)];
+                    }
+                }
+            }
+        }
+    } // namespace threaded_openmp
+
     namespace threaded_transposed {
         void multiplyMxChunk(Type const* a,
                              Type const* bt,
@@ -528,7 +545,16 @@ int main(int argc, char const* argv[]) {
             [] {},
             [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
+        std::cout << "N = " << N << ", nt = " << i << ":  " << time << " ms\n";
+    }
 
+    std::cout << "Running threaded (OpenMP) computation...\n";
+    for (unsigned i = 1; i <= 256; i *= 2) {
+        auto time = timeAndValidate(
+            [=] { threaded_openmp::multiplyMx(a, b, c, N, i); },
+            [=] { populateMx(c, N); }, // Reset output with random values
+            [] {},
+            [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
         std::cout << "N = " << N << ", nt = " << i << ":  " << time << " ms\n";
     }
