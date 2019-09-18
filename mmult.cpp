@@ -16,11 +16,12 @@
   Author: Tim Quelch (t.quelch@qut.edu.au)
 */
 
-#include <chrono>   // For timing
-#include <fstream>  // File input/output
-#include <iostream> // Console input/output
-#include <random>   // Random number generator
-#include <thread>   // C++ threads
+#include <chrono>     // For timing
+#include <fstream>    // File input/output
+#include <functional> // for passing functions as parameters
+#include <iostream>   // Console input/output
+#include <random>     // Random number generator
+#include <thread>     // C++ threads
 
 #include <pthread.h> // POSIX threads (pthreads)
 
@@ -40,8 +41,23 @@ Type rng() {
     return distribution(engine); // Generate the random number
 }
 
-// This namespace contains functions that work with 'jagged' allocations of matrices. These matrices
-// are of Type** and require N+1 memory allocations of size N
+// Function to time and validate test
+double timeAndValidate(std::function<void()> test,
+                       std::function<void()> preTest,
+                       std::function<void()> postTest,
+                       std::function<void()> validate) {
+    preTest();
+    auto start = std::chrono::high_resolution_clock::now();
+    test();
+    auto end = std::chrono::high_resolution_clock::now();
+    postTest();
+
+    validate();
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+// This namespace contains functions that work with 'jagged' allocations of matrices. These
+// matrices are of Type** and require N+1 memory allocations of size N
 namespace jagged {
     // Allocate a mx in memory
     Type** allocateMx(unsigned N) {
@@ -400,7 +416,6 @@ namespace flat {
     }
 } // namespace flat
 
-
 int main(int argc, char const* argv[]) {
     // Set N from the arguments or user input
     unsigned N = 0;
@@ -422,17 +437,10 @@ int main(int argc, char const* argv[]) {
         jagged::populateMx(a, N);
         jagged::populateMx(b, N);
 
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        jagged::multiplyMx(a, b, c, N);                         // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
+        auto time = timeAndValidate([=] { jagged::multiplyMx(a, b, c, N); }, [] {}, [] {}, [] {});
 
         // Print time to output
         std::cout << "N = " << N << ":  " << time << " ms\n";
-        jagged::outputFile(c, "validation.bin", N);          // Write output to file
-        jagged::validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
 
         jagged::deallocateMx(a, N);
         jagged::deallocateMx(b, N);
@@ -453,119 +461,90 @@ int main(int argc, char const* argv[]) {
 
     std::cout << "Running serial computation...\n";
     {
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        multiplyMx(a, b, c, N);                                 // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
+        auto time =
+            timeAndValidate([=] { multiplyMx(a, b, c, N); },
+                            [] {},
+                            [=] { outputFile(c, "validation.bin", N); }, // Output validation file
+                            [] {});
 
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
         std::cout << "N = " << N << ":  " << time << " ms\n";
-        outputFile(c, "validation.bin", N);          // Write output to file
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
     std::cout << "Running transposed serial computation...\n";
     {
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        transposeMx(b, N);                                      // Transpose b matrix
-        transposed::multiplyMx(a, b, c, N);                     // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-        transposeMx(b, N);                                      // Reset b for next computation
+        auto time = timeAndValidate(
+            [=] {
+                transposeMx(b, N); // Transpose matrix before computation
+                transposed::multiplyMx(a, b, c, N);
+            },
+            [=] { populateMx(c, N); },  // Reset output with random values
+            [=] { transposeMx(b, N); }, // Reset b matrix afterwards
+            [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
         std::cout << "N = " << N << ":  " << time << " ms\n";
-        outputFile(c, "output.bin", N);              // Write output to file
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
     std::cout << "Running tiled serial computation...\n";
     for (unsigned i = 1; i <= 1024; i *= 2) {
-        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
+        auto time = timeAndValidate(
+            [=] { tiled::multiplyMx(a, b, c, N, i); },
+            [=] { populateMx(c, N); }, // Reset output with random values
+            [] {},
+            [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        tiled::multiplyMx(a, b, c, N, i);                       // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
         std::cout << "N = " << N << ", ts = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
     std::cout << "Running tiled and transposed serial computation...\n";
     for (unsigned i = 1; i <= 1024; i *= 2) {
-        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
+        auto time = timeAndValidate(
+            [=] {
+                transposeMx(b, N);
+                tiled_transposed::multiplyMx(a, b, c, N, i);
+            },
+            [=] { populateMx(c, N); }, // Reset output with random values
+            [=] { transposeMx(b, N); },
+            [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        transposeMx(b, N);                                      // Transpose b matrix
-        tiled_transposed::multiplyMx(a, b, c, N, i);            // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-        transposeMx(b, N);                                      // Reset b for next computation
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
         std::cout << "N = " << N << ", ts = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
     std::cout << "Running threaded (std::thread) computation...\n";
     for (unsigned i = 1; i <= 256; i *= 2) {
-        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
+        auto time = timeAndValidate(
+            [=] { threaded::multiplyMx(a, b, c, N, i); },
+            [=] { populateMx(c, N); }, // Reset output with random values
+            [] {},
+            [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        threaded::multiplyMx(a, b, c, N, i);                    // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
         std::cout << "N = " << N << ", nt = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
     std::cout << "Running threaded (pthreads) computation...\n";
     for (unsigned i = 1; i <= 256; i *= 2) {
-        populateMx(c, N); // Reset output mx to random values to ensure validation works correctly
+        auto time = timeAndValidate(
+            [=] { threaded_pthreads::multiplyMx(a, b, c, N, i); },
+            [=] { populateMx(c, N); }, // Reset output with random values
+            [] {},
+            [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        threaded_pthreads::multiplyMx(a, b, c, N, i);           // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
 
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
 
-        // Print time to output
         std::cout << "N = " << N << ", nt = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
     std::cout << "Running threaded transposed computation...\n";
     for (unsigned i = 1; i <= 256; i *= 2) {
-        populateMx(c,
-                   N); // Reset output mx to random values to ensure validation works correctly
+        auto time = timeAndValidate(
+            [=] {
+                transposeMx(b, N);
+                threaded_transposed::multiplyMx(a, b, c, N, i);
+            },
+            [=] { populateMx(c, N); }, // Reset output with random values
+            [=] { transposeMx(b, N); },
+            [=] { validateAgainstFile(c, "validation.bin", N); }); // Validate output
 
-        auto start = std::chrono::high_resolution_clock::now(); // Start a timer
-        transposeMx(b, N);                                      // Transpose b matrix
-        threaded_transposed::multiplyMx(a, b, c, N, i);         // Execute matrix multiply
-        auto end = std::chrono::high_resolution_clock::now();   // Top the timer
-        transposeMx(b, N);                                      // Transpose b matrix
-
-        // Calculate the time as floating point in milliseconds
-        auto time = std::chrono::duration<double, std::milli>(end - start).count();
-
-        // Print time to output
         std::cout << "N = " << N << ", nt = " << i << ":  " << time << " ms\n";
-        validateAgainstFile(c, "validation.bin", N); // Compare output to validation file
     }
 
     // Deallocate memory
