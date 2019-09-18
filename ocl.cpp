@@ -77,7 +77,7 @@ int main() {
             platforms[i], CL_PLATFORM_VERSION, maxStringLength, clVersion, nullptr));
 
         // Print this info
-        printf("%d: %p %s (%s)\n", i, platforms[i], platformName, clVersion);
+        printf("Platform: %d: %p %s (%s)\n", i, platforms[i], platformName, clVersion);
 
         // Find all the devices on this platform (usually only 1)
         const int maxDevices = 10;
@@ -118,8 +118,8 @@ int main() {
             check(clGetDeviceInfo(devices[j], CL_DEVICE_TYPE, sizeof(type), &type, nullptr));
 
             // Print device info
-            printf("%d: %p %s\n", j, devices[j], deviceName);
-            printf("%d:        Type: %s, Compute units: %d, global memory: %lu, local memory %lu\n",
+            printf("    Device: %d: %p %s\n", j, devices[j], deviceName);
+            printf("            %d: Type: %s, Compute units: %d, global mem: %lu, local mem: %lu\n",
                    j,
                    deviceType(type),
                    computeUnits,
